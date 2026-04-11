@@ -20,7 +20,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as matrix from "./matrix.js";
+
+// ── Auto-reply config ──
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const autoReplyPath = path.resolve(__dirname, "..", "auto-reply.json");
+const autoReply: { success: string[]; failure: string[] } = JSON.parse(
+  fs.readFileSync(autoReplyPath, "utf-8"),
+);
+
+function pickRandom(arr: string[]): string {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 for (const key of ["MATRIX_HOMESERVER", "MATRIX_ACCESS_TOKEN"]) {
   if (!process.env[key]) {
@@ -56,20 +71,26 @@ matrix.setChannelNotify((roomId, event) => {
   const eventId = event.event_id as string;
   const ts = new Date(event.origin_server_ts as number).toISOString();
 
-  server.server.notification({
-    method: "notifications/claude/channel" as any,
-    params: {
-      content: body,
-      meta: {
-        room_id: roomId,
-        sender,
-        message_id: eventId,
-        ts,
-      },
-    },
-  }).catch((err) => {
-    console.error("Channel notification failed:", err);
-  });
+  (async () => {
+    try {
+      await server.server.notification({
+        method: "notifications/claude/channel" as any,
+        params: {
+          content: body,
+          meta: {
+            room_id: roomId,
+            sender,
+            message_id: eventId,
+            ts,
+          },
+        },
+      });
+      await matrix.sendNotice(roomId, pickRandom(autoReply.success));
+    } catch (err) {
+      console.error("Channel notification failed:", err);
+      await matrix.sendNotice(roomId, pickRandom(autoReply.failure)).catch(() => {});
+    }
+  })();
 });
 
 // ── Tools ──

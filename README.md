@@ -97,35 +97,62 @@ npm install
 npm run build
 ```
 
-Copy the MCP config template and fill in your values:
+Register the MCP server with Claude Code using the CLI:
 
 ```bash
-cp .mcp.json.example .mcp.json
-```
-
-Edit `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "matrix": {
-      "command": "node",
-      "args": ["./dist/index.js"],
-      "env": {
-        "MATRIX_HOMESERVER": "https://YOUR_DOMAIN",
-        "MATRIX_ACCESS_TOKEN": "YOUR_BOT_ACCESS_TOKEN",
-        "MATRIX_USER_ID": "@claude-bot:YOUR_DOMAIN"
-      }
-    }
+claude mcp add-json -s user matrix '{
+  "command": "node",
+  "args": ["/absolute/path/to/matrix-mcp-server/dist/index.js"],
+  "env": {
+    "MATRIX_HOMESERVER": "https://YOUR_DOMAIN",
+    "MATRIX_ACCESS_TOKEN": "YOUR_BOT_ACCESS_TOKEN",
+    "MATRIX_USER_ID": "@claude-bot:YOUR_DOMAIN"
   }
-}
+}'
 ```
 
-Optional: restrict which Matrix users can push messages into Claude by adding:
+Replace the placeholder values with your actual homeserver URL, bot access token, and bot user ID. The path in `args` **must be absolute**.
+
+Optional: restrict which Matrix users can push messages into Claude by adding to the `env` object:
 
 ```json
 "MATRIX_ALLOWED_USERS": "@your_username:YOUR_DOMAIN"
 ```
+
+Verify the server is connected:
+
+```bash
+claude mcp get matrix
+```
+
+You should see:
+
+```
+matrix:
+  Scope: User config (available in all your projects)
+  Status: ✓ Connected
+```
+
+#### Configuration scopes
+
+The `-s` flag controls where the server is registered:
+
+| Scope | Flag | Availability |
+|-------|------|-------------|
+| `user` | `-s user` | All Claude Code sessions (recommended) |
+| `local` | `-s local` (default) | Only the current directory, not committed to git |
+| `project` | `-s project` | Current project, committed to git via `.mcp.json` |
+
+This repo includes a `.mcp.json.example` file as a reference for project-scoped configuration. To use it:
+
+```bash
+cp .mcp.json.example .mcp.json
+# Edit .mcp.json with your values
+```
+
+Project-scoped configs are useful for sharing server definitions with a team via git, but each user still needs to provide their own credentials.
+
+> **Note:** Claude Code manages MCP servers through the `claude mcp` CLI — not through `~/.claude/settings.json`. Adding `mcpServers` to `settings.json` directly will not work.
 
 ### 4. Connect a Matrix client
 
@@ -139,19 +166,13 @@ Download a Matrix client to chat with Claude:
 
 Sign in with your admin account, create a room, and invite the bot (`@claude-bot:YOUR_DOMAIN`).
 
-### 5. Start Claude Code with channels
+### 5. Start Claude Code
 
 ```bash
-claude --dangerously-load-development-channels server:matrix
+claude
 ```
 
-You should see:
-
-```
-Listening for channel messages from: server:matrix
-```
-
-Now send a message from your Matrix client — it will push directly into your Claude Code session. Claude can reply using the `matrix_send_message` tool.
+The Matrix MCP server starts automatically when Claude Code launches. Send a message from your Matrix client — it will push directly into your Claude Code session as a channel notification. Claude can reply using the `matrix_send_message` tool.
 
 ## Available tools
 
@@ -190,7 +211,7 @@ It walks you through the entire setup interactively — generates secrets, start
 
 The server runs as an MCP server over stdio. It connects to your Matrix homeserver using [matrix-bot-sdk](https://github.com/turt2live/matrix-bot-sdk) with the native Rust crypto provider for E2EE.
 
-When started with `--dangerously-load-development-channels server:matrix`, Claude Code listens for `notifications/claude/channel` events from the server. Incoming Matrix messages are pushed into the conversation as `<channel source="matrix">` tags. Claude reads these and can reply using the MCP tools.
+Claude Code automatically listens for `notifications/claude/channel` events from the server. Incoming Matrix messages are pushed into the conversation as `<channel source="matrix">` tags with room, sender, and timestamp metadata. Claude reads these and can reply using the MCP tools.
 
 The crypto state is persisted in `~/.matrix-mcp-server/` so E2EE sessions survive restarts.
 

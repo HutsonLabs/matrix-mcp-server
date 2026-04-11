@@ -61,13 +61,24 @@ export async function ensureClient(): Promise<MatrixClient> {
       path.join(dataDir, "bot-state.json"),
     );
 
-    const crypto = new RustSdkCryptoStorageProvider(
-      path.join(dataDir, "crypto"),
-      StoreType.Sqlite,
-    );
+    // Try E2EE crypto store; fall back to plain client if locked/conflicting
+    let crypto: RustSdkCryptoStorageProvider | undefined;
+    try {
+      crypto = new RustSdkCryptoStorageProvider(
+        path.join(dataDir, "crypto"),
+        StoreType.Sqlite,
+      );
+    } catch (err) {
+      console.error("Crypto store unavailable, running without E2EE:", err);
+    }
 
-    const c = new MatrixClient(homeserver, accessToken, storage, crypto);
+    const c = crypto
+      ? new MatrixClient(homeserver, accessToken, storage, crypto)
+      : new MatrixClient(homeserver, accessToken, storage);
     AutojoinRoomsMixin.setupOnClient(c);
+
+    // The client is usable for API calls immediately
+    client = c;
 
     const myUserId = await c.getUserId();
     c.on("room.message", (roomId: string, event: Record<string, unknown>) => {
@@ -84,9 +95,15 @@ export async function ensureClient(): Promise<MatrixClient> {
       }
     });
 
-    await c.start();
-    client = c;
-    console.error("Matrix bot-sdk client ready with E2EE");
+    // Start the sync loop — if E2EE key upload conflicts (another instance
+    // already owns this device), catch it and keep tools working without sync.
+    try {
+      await c.start();
+      console.error("Matrix bot-sdk client ready" + (crypto ? " with E2EE" : " (no E2EE)"));
+    } catch (err) {
+      console.error("Matrix sync/E2EE init failed — tools still available via API:", err);
+    }
+
     return c;
   })();
 

@@ -1,0 +1,12 @@
+{
+  "success": [
+    "On it",
+    "You bet",
+    "Stand by",
+    "Just a sec"
+  ],
+  "failure": [
+    "Nope. Somethin' ain't right",
+    "Whomp. Whomp. You better look into this"
+  ]
+}
