@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.homelab.matrix</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/matrix-start.sh</string>
+    </array>
+
+    <!-- Run at boot, before login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the script exits non-zero -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Wait 30s after boot before starting (lets kernel settle) -->
+    <key>StartInterval</key>
+    <integer>30</integer>
+
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/matrix-start.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/matrix-start.log</string>
+</dict>
+</plist>

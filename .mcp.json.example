@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "matrix": {
+      "command": "node",
+      "args": [
+        "./dist/index.js"
+      ],
+      "env": {
+        "MATRIX_HOMESERVER": "https://YOUR_DOMAIN",
+        "MATRIX_ACCESS_TOKEN": "YOUR_ACCESS_TOKEN",
+        "MATRIX_USER_ID": "@YOUR_BOT_USER:YOUR_DOMAIN"
+      }
+    }
+  }
+}

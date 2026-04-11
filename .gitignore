@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment and secrets
+.env
+.mcp.json
+
+# macOS
+.DS_Store
+
+# Matrix server data (generated at runtime)
+matrix-server/postgres-data/
+matrix-server/media/
+matrix-server/synapse-data/*.signing.key
+matrix-server/synapse-data/media_store/
+
+# Matrix server configs with real secrets (use .example templates)
+matrix-server/.env
+matrix-server/synapse-data/homeserver.yaml
+matrix-server/element/config.json
+
+# Claude Code local state
+.claude/
+
+# Lockfiles (optional — uncomment if you want to track these)
+# bun.lock
+# package-lock.json

@@ -1,0 +1,24 @@
+{
+    "default_server_config": {
+        "m.homeserver": {
+            "base_url": "https://YOUR_DOMAIN",
+            "server_name": "YOUR_DOMAIN"
+        }
+    },
+    "brand": "Element",
+    "default_theme": "dark",
+    "room_directory": {
+        "servers": ["YOUR_DOMAIN"]
+    },
+    "features": {
+        "feature_voice_messages": true
+    },
+    "showLabsSettings": true,
+    "piwik": false,
+    "posthog": {
+        "projectApiKey": "",
+        "apiHost": ""
+    },
+    "privacy_policy_url": null,
+    "disable_guests": false
+}
