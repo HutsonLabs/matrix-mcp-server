@@ -28,3 +28,4 @@ matrix-server/element/config.json
 # Lockfiles (optional — uncomment if you want to track these)
 # bun.lock
 # package-lock.json
+stderr.log
