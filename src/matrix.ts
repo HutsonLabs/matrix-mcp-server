@@ -41,6 +41,23 @@ const allowedUsers: Set<string> | null = process.env.MATRIX_ALLOWED_USERS
   ? new Set(process.env.MATRIX_ALLOWED_USERS.split(",").map((s) => s.trim()).filter(Boolean))
   : null; // null = allow all
 
+// Refuse to send to encrypted rooms if crypto is unavailable.
+const requireE2EE = process.env.MATRIX_REQUIRE_E2EE === "1"
+  || process.env.MATRIX_REQUIRE_E2EE === "true";
+let cryptoReady = false;
+
+async function assertEncryptionSafe(c: MatrixClient, roomId: string): Promise<void> {
+  if (cryptoReady || !requireE2EE) return;
+  try {
+    await c.getRoomStateEvent(roomId, "m.room.encryption", "");
+  } catch {
+    return; // room is unencrypted — safe to send plaintext
+  }
+  throw new Error(
+    `Refusing to send to encrypted room ${roomId}: E2EE not ready and MATRIX_REQUIRE_E2EE is set`,
+  );
+}
+
 // Channel notification callback — set by index.ts when channel mode is active
 let channelNotify: ((roomId: string, event: Record<string, unknown>) => void) | null = null;
 
@@ -55,7 +72,12 @@ export async function ensureClient(): Promise<MatrixClient> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    try {
+      fs.chmodSync(dataDir, 0o700);
+    } catch (err) {
+      console.error("Failed to chmod data dir to 0700:", err);
+    }
 
     const storage = new SimpleFsStorageProvider(
       path.join(dataDir, "bot-state.json"),
@@ -80,7 +102,19 @@ export async function ensureClient(): Promise<MatrixClient> {
     // The client is usable for API calls immediately
     client = c;
 
-    const myUserId = await c.getUserId();
+    // Verify access token up-front via whoami so we fail fast on a
+    // revoked/expired token rather than mid-tool-call.
+    let myUserId: string;
+    try {
+      const who = await c.doRequest("GET", "/_matrix/client/v3/account/whoami");
+      myUserId = who.user_id as string;
+      if (!myUserId) throw new Error("whoami returned no user_id");
+      console.error(`Matrix token verified for ${myUserId}`);
+    } catch (err) {
+      throw new Error(
+        `Matrix access token verification failed (whoami): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     c.on("room.message", (roomId: string, event: Record<string, unknown>) => {
       const content = event.content as Record<string, unknown> | undefined;
       if (!content?.msgtype) return;
@@ -99,9 +133,36 @@ export async function ensureClient(): Promise<MatrixClient> {
     // already owns this device), catch it and keep tools working without sync.
     try {
       await c.start();
+      cryptoReady = !!crypto;
       console.error("Matrix bot-sdk client ready" + (crypto ? " with E2EE" : " (no E2EE)"));
     } catch (err) {
-      console.error("Matrix sync/E2EE init failed — tools still available via API:", err);
+      console.error("Matrix sync/E2EE init failed — retrying without E2EE:", err);
+      // Rebuild client without crypto so sendMessage/sendNotice don't hit
+      // the broken crypto.isRoomEncrypted() → requiresReady() path.
+      try {
+        c.stop();
+      } catch {}
+      const plainClient = new MatrixClient(homeserver, accessToken, storage);
+      AutojoinRoomsMixin.setupOnClient(plainClient);
+      client = plainClient;
+
+      const plainUserId = await plainClient.getUserId();
+      plainClient.on("room.message", (roomId: string, event: Record<string, unknown>) => {
+        const content = event.content as Record<string, unknown> | undefined;
+        if (!content?.msgtype) return;
+        if (event.sender === plainUserId) return;
+        if (allowedUsers && !allowedUsers.has(event.sender as string)) return;
+        if (channelNotify) channelNotify(roomId, event);
+      });
+
+      try {
+        await plainClient.start();
+        console.error("Matrix client restarted without E2EE — sync active");
+      } catch (syncErr) {
+        console.error("Matrix sync failed even without E2EE — API-only mode:", syncErr);
+      }
+
+      return plainClient;
     }
 
     return c;
@@ -209,12 +270,37 @@ export async function sendMessage(
     content.format = "org.matrix.custom.html";
     content.formatted_body = html;
   }
-  return await c.sendMessage(roomId, content);
+  // bot-sdk's sendMessage routes through crypto.isRoomEncrypted() which
+  // throws "E2EE has not initialized" if the crypto client never became
+  // ready (e.g. start() failed). Fall back to sendRawEvent to bypass.
+  try {
+    return await c.sendMessage(roomId, content);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("encryption has not initialized")) {
+      await assertEncryptionSafe(c, roomId);
+      console.error("E2EE not ready — sending unencrypted via sendRawEvent");
+      return await c.sendRawEvent(roomId, "m.room.message", content);
+    }
+    throw err;
+  }
 }
 
 export async function sendNotice(roomId: string, body: string): Promise<string> {
   const c = await ensureClient();
-  return await c.sendNotice(roomId, body);
+  const content: Record<string, unknown> = {
+    msgtype: "m.notice",
+    body,
+  };
+  try {
+    return await c.sendNotice(roomId, body);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("encryption has not initialized")) {
+      await assertEncryptionSafe(c, roomId);
+      console.error("E2EE not ready — sending notice unencrypted via sendRawEvent");
+      return await c.sendRawEvent(roomId, "m.room.message", content);
+    }
+    throw err;
+  }
 }
 
 export interface MessageSummary {

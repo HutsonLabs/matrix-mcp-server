@@ -64,12 +64,41 @@ const server = new McpServer(
 
 // ── Channel: push incoming Matrix messages into Claude ──
 
+// Per-room token bucket: MATRIX_CHANNEL_RATE msgs per MATRIX_CHANNEL_WINDOW_MS.
+const CHANNEL_RATE = Number(process.env.MATRIX_CHANNEL_RATE ?? 10);
+const CHANNEL_WINDOW_MS = Number(process.env.MATRIX_CHANNEL_WINDOW_MS ?? 60_000);
+const CHANNEL_MAX_BODY = Number(process.env.MATRIX_CHANNEL_MAX_BODY ?? 8_000);
+const roomBuckets = new Map<string, { tokens: number; updated: number }>();
+
+function allowChannel(roomId: string): boolean {
+  const now = Date.now();
+  const b = roomBuckets.get(roomId) ?? { tokens: CHANNEL_RATE, updated: now };
+  const refill = ((now - b.updated) / CHANNEL_WINDOW_MS) * CHANNEL_RATE;
+  b.tokens = Math.min(CHANNEL_RATE, b.tokens + refill);
+  b.updated = now;
+  if (b.tokens < 1) {
+    roomBuckets.set(roomId, b);
+    return false;
+  }
+  b.tokens -= 1;
+  roomBuckets.set(roomId, b);
+  return true;
+}
+
 matrix.setChannelNotify((roomId, event) => {
   const content = event.content as Record<string, unknown>;
-  const body = (content.body as string) ?? "";
+  let body = (content.body as string) ?? "";
   const sender = event.sender as string;
   const eventId = event.event_id as string;
   const ts = new Date(event.origin_server_ts as number).toISOString();
+
+  if (!allowChannel(roomId)) {
+    console.error(`Channel rate limit hit for ${roomId} — dropping ${eventId}`);
+    return;
+  }
+  if (body.length > CHANNEL_MAX_BODY) {
+    body = body.slice(0, CHANNEL_MAX_BODY) + `\n…[truncated ${body.length - CHANNEL_MAX_BODY} chars]`;
+  }
 
   (async () => {
     try {
